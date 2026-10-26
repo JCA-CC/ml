@@ -261,6 +261,10 @@ details.help ul{padding-left:1.2em;margin:.5em 0}
 .add-list li{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
 .add-list li span{flex:1;min-width:0}
 .pchip.opt b{text-decoration:none}
+.ex-scroll{max-height:56vh;overflow:auto;margin:0 -4px;padding:0 4px}
+.ex-h{margin-top:12px}.ex-list{max-height:none}
+.pdf-row.auto{color:var(--ink-2)}.pdf-row.auto[aria-pressed="true"] .tick{background:transparent;border:1.5px dashed var(--chord);color:var(--chord);font-size:1.2rem}
+.pdf-row .exnote{display:block;font-weight:400;color:var(--muted);font-size:.78rem}
 .imp-list{max-height:58vh;overflow:auto;margin:0 -4px;padding:0 4px}
 .imp-g{border-top:1px solid var(--line);padding-top:10px;margin-top:6px}
 .imp-gh{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:flex-end;justify-content:space-between;margin-bottom:4px}
@@ -1040,6 +1044,43 @@ async function saveFile(filename, blob, okMsg) {
   try { await dl.save({ filename, data: blob }); toast(okMsg); return true; }
   catch (e) { if (e && e.code !== 'declined') toast(e && e.code === 'rate_limited' ? 'A save is already waiting for your answer.' : "Couldn't save the file here."); return false; }
 }
+// What an export contains: the ticked items plus every song a ticked medley or setlist needs,
+// so nothing arrives with missing songs. needed: song id -> names of what needs it.
+function exportSelection(on) {
+  const songIds = new Set([...on].filter(k => k.startsWith('s:')).map(k => k.slice(2)).filter(id => S.songs.has(id)));
+  const setIds = [...on].filter(k => k.startsWith('l:')).map(k => k.slice(2)).filter(id => S.setlists.has(id));
+  const needed = new Map();
+  const need = (id, by) => { if (!S.songs.has(id)) return; if (!needed.has(id)) needed.set(id, []); if (!needed.get(id).includes(by)) needed.get(id).push(by); };
+  for (const id of setIds) { const sl = S.setlists.get(id); for (const sid of sl.songIds || []) need(sid, sl.name || 'a setlist'); }
+  const medleys = [...songIds, ...needed.keys()].map(id => S.songs.get(id)).filter(x => x && x.medley);
+  for (const m of medleys) for (const p of m.medley) need(p.id, m.title || 'a medley');
+  const all = new Set([...songIds, ...needed.keys()]);
+  return { songs: [...all].map(id => S.songs.get(id)), setlists: setIds.map(id => S.setlists.get(id)), needed, picked: songIds };
+}
+function exportSheet() {
+  const sh = S.sheet; const sel = exportSelection(sh.on);
+  const row = (key, name, sub, cls = '') => {
+    const id = key.slice(2), picked = sh.on.has(key), auto = !picked && key[0] === 's' && sel.needed.has(id);
+    const note = auto ? 'Included: used by ' + sel.needed.get(id).slice(0, 2).join(', ') + (sel.needed.get(id).length > 2 ? '…' : '') : sub;
+    return `<li><button class="pdf-row${auto ? ' auto' : ''}" data-act="exTog" data-k="${esc(key)}" aria-pressed="${picked || auto}"><span class="tick">${picked ? '✓' : auto ? '•' : ''}</span><span><span class="${cls}">${esc(name)}</span>${note ? `<small class="exnote">${esc(note)}</small>` : ''}</span></button></li>`;
+  };
+  const group = (g, title, items) => {
+    if (!items.length) return '';
+    const n = items.filter(x => sh.on.has(x.key)).length;
+    return `<div class="pdf-h ex-h"><span class="lbl">${title} (${n} of ${items.length})</span><button class="btn ghost" data-act="exAll" data-g="${g}" data-v="1">All</button><button class="btn ghost" data-act="exAll" data-g="${g}" data-v="0">None</button></div>
+      <ul class="add-list pdf-list ex-list">${items.map(x => row(x.key, x.name, x.sub, x.cls)).join('')}</ul>`;
+  };
+  const songs = [...S.songs.values()].filter(x => !x.medley).sort(byTitle).map(x => ({ key: 's:' + x.id, name: x.title || 'Untitled', sub: x.artist || '' }));
+  const meds = [...S.songs.values()].filter(x => x.medley).sort(byTitle).map(x => ({ key: 's:' + x.id, name: x.title || 'Untitled medley', sub: x.medley.length + ' songs', cls: 'medley' }));
+  const sets = [...S.setlists.values()].sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(x => ({ key: 'l:' + x.id, name: x.name || 'Untitled setlist', sub: (x.songIds || []).length + ' songs' }));
+  const nS = sel.songs.filter(x => !x.medley).length, nM = sel.songs.length - nS, nL = sel.setlists.length, total = nS + nM + nL;
+  const extra = sel.songs.length - sel.picked.size;
+  return `<div class="sheet-h"><h2>Export Library</h2><button class="icon" data-act="closeSheet" aria-label="Close">×</button></div>
+    <p class="hint" style="margin:0 0 6px">Choose what goes in the file. Songs that a chosen medley or setlist uses come along automatically, marked with •.</p>
+    <div class="ex-scroll">${group('s', 'Songs', songs)}${group('m', 'Medleys', meds)}${group('l', 'Setlists', sets)}</div>
+    <p class="hint" style="margin:10px 0 0">${total ? `${nS} song${nS === 1 ? '' : 's'}, ${nM} medley${nM === 1 ? '' : 's'} and ${nL} setlist${nL === 1 ? '' : 's'}${extra > 0 ? `, including ${extra} added because they're used` : ''}.` : 'Nothing selected.'}</p>
+    <button class="btn primary" data-act="exGo" style="width:100%;margin-top:10px" ${total && !sh.busy ? '' : 'disabled'}>${sh.busy ? 'Exporting…' : 'Export'}</button>`;
+}
 const medPart = p => ({ id: p.id, tr: p.tr || 0, skip: [...(p.skip || [])] });
 // A medley stores links to songs; its chart is built from the originals each time it is shown.
 function effective(s) {
@@ -1420,7 +1461,7 @@ function closeSheet() { S.sheet = null; $('#sheetWrap').hidden = true; $('#sheet
 function drawSheet() {
   const sh = S.sheet; if (!sh) return closeSheet();
   withFocus(() => {
-    $('#sheet').innerHTML = '<div class="grab" aria-hidden="true"></div>' + (sh.type === 'chord' ? chordSheet() : sh.type === 'pick' ? pickSheet() : sh.type === 'pdf' ? pdfSheet() : sh.type === 'import' ? importSheet() : addSheet());
+    $('#sheet').innerHTML = '<div class="grab" aria-hidden="true"></div>' + (sh.type === 'chord' ? chordSheet() : sh.type === 'pick' ? pickSheet() : sh.type === 'pdf' ? pdfSheet() : sh.type === 'import' ? importSheet() : sh.type === 'export' ? exportSheet() : addSheet());
   });
   $('#sheetWrap').hidden = false;
 }
@@ -1562,22 +1603,29 @@ const A = {
     try { const msg = await runImport(); closeSheet(); render(); toast(msg); }
     catch (e) { sh.busy = false; drawSheet(); render(); toast(errMsg(e)); }
   },
-  async exportLib() {
-    const data = { app: 'MatZ Live', version: 1, exportedAt: new Date().toISOString(), songs: [...S.songs.values()], setlists: [...S.setlists.values()] };
+  exportLib() {
+    // Everything is ticked to start with; the sheet lets you narrow it down.
+    S.sheet = { type: 'export', on: new Set([...[...S.songs.keys()].map(id => 's:' + id), ...[...S.setlists.keys()].map(id => 'l:' + id)]), busy: false };
+    drawSheet();
+  },
+  exTog(el) { const k = el.dataset.k, on = S.sheet.on; on.has(k) ? on.delete(k) : on.add(k); drawSheet(); },
+  exAll(el) {
+    const on = S.sheet.on, g = el.dataset.g, v = el.dataset.v === '1';
+    const keys = g === 'l' ? [...S.setlists.keys()].map(id => 'l:' + id) : [...S.songs.values()].filter(x => !!x.medley === (g === 'm')).map(x => 's:' + x.id);
+    keys.forEach(k => v ? on.add(k) : on.delete(k)); drawSheet();
+  },
+  async exGo() {
+    const sh = S.sheet; if (!sh || sh.busy) return;
+    const { songs, setlists } = exportSelection(sh.on);
+    if (!songs.length && !setlists.length) return;
+    sh.busy = true; drawSheet();
+    const data = { app: 'MatZ Live', version: 1, exportedAt: new Date().toISOString(), songs, setlists };
     const d = new Date(), two = n => String(n).padStart(2, '0');   // local time: ML-Lib-YYMMDD-HHMM.json
     const filename = 'ML-Lib-' + two(d.getFullYear() % 100) + two(d.getMonth() + 1) + two(d.getDate()) + '-' + two(d.getHours()) + two(d.getMinutes()) + '.json';
-    if (!STANDALONE) {
-      let dl = null; try { dl = await window.claude.use('downloads'); } catch {}
-      if (!dl) { toast("Saving files isn't available in this view. Open the songbook on claude.ai to export."); return; }
-      try { await dl.save({ filename, data: JSON.stringify(data, null, 1) }); toast(`Backup saved: ${S.songs.size} songs and ${S.setlists.size} setlists.`); }
-      catch (e) { if (e && e.code === 'declined') return; toast(e && e.code === 'rate_limited' ? 'A save is already waiting for your answer.' : "Couldn't save the backup here."); }
-      return;
-    }
-    const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    toast(`Exported ${S.songs.size} songs and ${S.setlists.size} setlists.`);
+    const nSongs = songs.filter(x => !x.medley).length, nMed = songs.length - nSongs;
+    const what = [nSongs && `${nSongs} song${nSongs === 1 ? '' : 's'}`, nMed && `${nMed} medley${nMed === 1 ? '' : 's'}`, setlists.length && `${setlists.length} setlist${setlists.length === 1 ? '' : 's'}`].filter(Boolean).join(', ');
+    const ok = await saveFile(filename, new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }), `Library exported: ${what}.`);
+    if (S.sheet === sh) { sh.busy = false; if (ok) closeSheet(); else drawSheet(); }
   },
   copySong() {
     const s = S.songs.get(cur().id); if (!s) return;
