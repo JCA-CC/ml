@@ -75,6 +75,7 @@ code,kbd{font-family:var(--f-mono);font-size:.9em;background:var(--sunk);padding
 .brand .live{background:linear-gradient(95deg,var(--chord) 10%,var(--medley) 55%,var(--p1) 95%);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:none;
   filter:drop-shadow(0 0 14px color-mix(in srgb,var(--chord) 45%,transparent));padding-right:.06em}
 .tabs{display:flex;gap:4px}
+.tab.tab-end{margin-left:auto;margin-right:0}
 .tab{padding:10px 4px 12px;margin-right:18px;font-weight:700;color:var(--muted);border-bottom:3px solid transparent}
 .tab[aria-selected="true"]{color:var(--ink);border-color:var(--chord)}
 .tab .n{font-family:var(--f-mono);font-size:.8em;font-weight:500;margin-left:.35em;color:var(--muted)}
@@ -178,7 +179,7 @@ button.ch:hover{background:var(--chord-soft)}
 .seg-ctl{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:3px;background:var(--surface);margin-bottom:12px}
 .seg-ctl button{padding:7px 16px;border-radius:999px;font-weight:700;font-size:.9rem;color:var(--muted)}
 .seg-ctl button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
-.tapbar{position:sticky;top:calc(env(safe-area-inset-top,0px) + 57px);z-index:3;background:var(--bg);display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-block:8px 4px;margin-bottom:6px}
+.tapbar{position:sticky;top:calc(env(safe-area-inset-top,0px) + 57px);z-index:3;background:transparent;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-block:8px 4px;margin-bottom:6px}
 .tapbar .lbl{font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
 .tapbar .seg-ctl{margin-bottom:0}
 .sb-tip{font-size:.82rem;color:var(--chord);font-weight:700;padding-top:8px}
@@ -265,6 +266,14 @@ details.help ul{padding-left:1.2em;margin:.5em 0}
 .ex-h{margin-top:12px}.ex-list{max-height:none}
 .pdf-row.auto{color:var(--ink-2)}.pdf-row.auto[aria-pressed="true"] .tick{background:transparent;border:1.5px dashed var(--chord);color:var(--chord);font-size:1.2rem}
 .pdf-row .exnote{display:block;font-weight:400;color:var(--muted);font-size:.78rem}
+.cl-tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px}
+.cl-find{flex:1 1 260px;min-width:0}.cl-find input{background:var(--surface);font-size:1rem;height:42px}.cl-find input::placeholder{font-family:var(--f-body);font-weight:400}
+.cl-sec{margin-top:18px}.cl-sec .lbl{font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 8px}
+.cl-wrap{overflow-x:auto;margin:0 -4px;padding:0 4px 6px}
+.cl-table{border-collapse:separate;border-spacing:4px;font-variant-numeric:tabular-nums}
+.cl-table th{font-size:.72rem;font-weight:700;color:var(--muted);text-align:center;white-space:nowrap;padding:2px 4px}
+.cl-table th[scope=row]{font-family:var(--f-mono);font-size:.95rem;color:var(--ink);text-align:right;padding-right:8px;position:sticky;left:0;background:color-mix(in srgb,var(--bg) 80%,transparent)}
+.cl-table td .chip{width:100%;min-width:3.6em;white-space:nowrap}
 .imp-list{max-height:58vh;overflow:auto;margin:0 -4px;padding:0 4px}
 .imp-g{border-top:1px solid var(--line);padding-top:10px;margin-top:6px}
 .imp-gh{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:flex-end;justify-content:space-between;margin-bottom:4px}
@@ -1217,10 +1226,10 @@ function statusLine() {
 }
 function vLibrary() {
   const v = cur();
-  const tab = (t, label, n) => `<button class="tab" role="tab" aria-selected="${v.tab === t}" data-act="tab" data-t="${t}">${label}<span class="n">${n}</span></button>`;
+  const tab = (t, label, n, cls = '') => `<button class="tab${cls}" role="tab" aria-selected="${v.tab === t}" data-act="tab" data-t="${t}">${label}${n != null ? `<span class="n">${n}</span>` : ''}</button>`;
   return `<header class="appbar"><div class="wrap"><div class="pennants" aria-hidden="true"></div><div class="brand"><span class="kicker">Munmansverktyget:</span><b>MatZ <span class="live">Live</span></b></div></div>
-    <nav class="wrap tabs" role="tablist">${tab('songs', 'Songs', S.songs.size)}${tab('sets', 'Setlists', S.setlists.size)}</nav></header>
-    <main class="wrap">${v.tab === 'songs' ? libSongs() : libSets()}${statusLine()}</main>`;
+    <nav class="wrap tabs" role="tablist">${tab('songs', 'Songs', S.songs.size)}${tab('sets', 'Setlists', S.setlists.size)}${tab('chords', 'Chord library', null, ' tab-end')}</nav></header>
+    <main class="wrap">${v.tab === 'chords' ? libChords() : (v.tab === 'songs' ? libSongs() : libSets()) + statusLine()}</main>`;
 }
 function libSongs() {
   if (S.mode === 'loading') return `<div class="empty"><p class="empty-t">Opening the songbook…</p><p>Your songs and setlists will appear here.</p></div>`;
@@ -1234,6 +1243,26 @@ function libSongs() {
     return `<li><button class="song-row" data-act="openSong" data-id="${esc(s.id)}"><span class="sr-title${s.medley ? ' medley' : ''}">${esc(s.title || 'Untitled')}</span>${(() => { const ks = songKeys(s); const k = pretty(songKey(s)); const e = ks && ks.changes.length && !sameSignature(ks.end, ks.base) ? pretty(keyStr(ks.end)) : ''; return `<span class="sr-key" title="${ks && ks.changes.length ? 'Key changes during the song' : 'Key'}">${esc(k || '—')}${e ? '→' + esc(e) : ks && ks.changes.length ? '*' : ''}</span>`; })()}<span class="sr-sub">${sub || '&nbsp;'}</span></button></li>`;
   }).join('');
   return tools + (list.length ? `<ul class="songs">${rows}</ul>` : `<p class="hint">No songs match “${esc(S.q)}”.</p>`);
+}
+// ---------- Chord library: every root with the common chord types; tap for shapes ----------
+const CL_TYPES = [['', 'Major'], ['m', 'Minor'], ['7', '7'], ['maj7', 'maj7'], ['m7', 'm7'], ['6', '6'], ['m6', 'm6'], ['9', '9'], ['add9', 'add9'],
+  ['sus2', 'sus2'], ['sus4', 'sus4'], ['7sus4', '7sus4'], ['5', '5 (power)'], ['dim', 'dim'], ['dim7', 'dim7'], ['m7b5', 'm7♭5'], ['aug', 'aug'], ['mmaj7', 'm(maj7)']];
+const CL_ROOTS = { sharp: ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'], flat: ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'], mixed: ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'] };
+function libChords() {
+  const sp = S.settings.clSpell || 'mixed';
+  const used = [...new Set([...S.songs.values()].flatMap(s => uniqueChords(s.body || '')))].filter(c => chordInfo(c))
+    .sort((a, b) => { const x = chordInfo(a), y = chordInfo(b); return x.root - y.root || a.length - b.length || a.localeCompare(b); });
+  const q = (S.clq || '').trim(); const qi = q && chordInfo(q.replace(/♯/g, '#').replace(/♭/g, 'b'));
+  const spellBtn = (k, l) => `<button data-act="clSpell" data-v="${k}" aria-pressed="${sp === k}">${l}</button>`;
+  const head = `<tr><th scope="col"></th>${CL_TYPES.map(([, l]) => `<th scope="col">${esc(l)}</th>`).join('')}</tr>`;
+  const rows = CL_ROOTS[sp].map(r => `<tr><th scope="row">${esc(pretty(r))}</th>${CL_TYPES.map(([t]) => { const c = r + t; return `<td><button class="chip" data-act="chord" data-c="${esc(c)}">${esc(pretty(c))}</button></td>`; }).join('')}</tr>`).join('');
+  return `<div class="cl-tools">
+      <form class="pick-form cl-find" data-form="clfind"><input id="cl-q" data-in="clq" value="${esc(q)}" placeholder="Look up any chord: D/F#, Cadd9…" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Look up a chord"><button class="btn primary" type="submit" ${qi ? '' : 'disabled'}>Show</button></form>
+      <div class="seg-ctl imp-seg" role="group" aria-label="Note names">${spellBtn('mixed', 'C♯ E♭')}${spellBtn('sharp', '♯')}${spellBtn('flat', '♭')}</div>
+    </div>
+    <p class="hint">Tap any chord to see how to play it on guitar, Drop D, ukulele and piano, with several shapes to choose from.</p>
+    ${used.length ? `<div class="cl-sec"><p class="lbl">In your songs (${used.length})</p><div class="chips">${used.map(c => `<button class="chip" data-act="chord" data-c="${esc(c)}">${esc(pretty(c))}</button>`).join('')}</div></div>` : ''}
+    <div class="cl-sec"><p class="lbl">All chords</p><div class="cl-wrap"><table class="cl-table">${head}${rows}</table></div></div>`;
 }
 function libSets() {
   if (S.mode === 'loading') return `<div class="empty"><p class="empty-t">Opening the songbook…</p></div>`;
@@ -1299,10 +1328,13 @@ function vEdit() {
   const conf = S.confirm === 'discard' ? `<div class="confirm-band"><div class="wrap confirm">Discard your changes? <button class="btn danger" data-act="discard">Discard</button><button class="btn" data-act="keep">Keep editing</button></div></div>` : '';
   const field = (k, label, ph, cls = '') => `<div class="field ${cls}"><label for="f-${k}">${label}</label><input id="f-${k}" data-in="f:${k}" value="${esc(d[k])}" placeholder="${ph}" autocomplete="off"${k === 'key' ? ' autocapitalize="off" spellcheck="false"' : ''}></div>`;
   const modeBtn = (m, label) => `<button data-act="mode" data-m="${m}" aria-pressed="${d.mode === m}">${label}</button>`;
-  const text = `<div class="tt"><span class="lbl">Transpose selection</span><button class="btn" data-act="trSel" data-n="-1">−1</button><button class="btn" data-act="trSel" data-n="1">+1</button><span class="sep"></span>
-      <button class="btn" data-act="insDir" data-d="chorus">Chorus</button><button class="btn" data-act="insDir" data-d="label">Section label</button><button class="btn" data-act="convert">Convert chords above lyrics</button></div>
-    <p class="hint">With nothing selected, transpose and convert apply to the whole song.</p>
-    <textarea id="body" data-in="f:body" spellcheck="false" autocapitalize="off" placeholder="{c: Verse 1}&#10;A[G]mazing [G7]grace, how [C]sweet the [G]sound&#10;&#10;{soc}&#10;Chorus lines go here&#10;{eoc}">${esc(d.body)}</textarea>
+  const hid = !!d.lyr, dis = hid ? ' disabled' : '';
+  const text = `<div class="tt"><button class="btn${hid ? ' on' : ''}" data-act="lyrToggle" aria-pressed="${hid}">${hid ? 'Show chords' : 'Hide chords'}</button><span class="sep"></span>
+      <span class="lbl">Transpose selection</span><button class="btn" data-act="trSel" data-n="-1"${dis}>−1</button><button class="btn" data-act="trSel" data-n="1"${dis}>+1</button><span class="sep"></span>
+      <button class="btn" data-act="insDir" data-d="chorus">Chorus</button><button class="btn" data-act="insDir" data-d="label">Section label</button><button class="btn" data-act="convert"${dis}>Convert chords above lyrics</button></div>
+    ${hid ? `<div class="tt spell"><span class="lbl">Spell check</span><div class="seg-ctl imp-seg" role="group" aria-label="Spell check language">${[['both', 'Svenska + English'], ['sv', 'Svenska'], ['en', 'English']].map(([v, l]) => `<button data-act="spellLang" data-v="${v}" aria-pressed="${(S.settings.spell || 'both') === v}">${l}</button>`).join('')}</div></div>` : ''}
+    <p class="hint">${hid ? 'Chords are hidden so you can edit the words freely. Keep each line on its own line: when you show the chords again, they go back onto the same lines, at about the same place in each line.' : 'With nothing selected, transpose and convert apply to the whole song. Hide chords to edit or translate the words without the brackets in the way.'}</p>
+    <textarea id="body" data-in="${hid ? 'lyr' : 'f:body'}" spellcheck="${hid}" lang="${hid ? spellLangFor(d.lyr.text) : ''}" autocapitalize="off" placeholder="{c: Verse 1}&#10;A[G]mazing [G7]grace, how [C]sweet the [G]sound&#10;&#10;{soc}&#10;Chorus lines go here&#10;{eoc}">${esc(hid ? d.lyr.text : d.body)}</textarea>
     <details class="help"><summary>How the text works</summary><ul>
       <li>Put a chord in square brackets just before the syllable where it changes: <code>[Am]Somewhere [F]over</code>.</li>
       <li>Name a part with <code>{c: Verse 2}</code>, <code>{c: Bridge}</code> or <code>{c: Solo}</code>.</li>
@@ -1547,7 +1579,79 @@ function keepScroll(ta, fn) {
   requestAnimationFrame(() => { ta.scrollTop = top; window.scrollTo(wx, wy); });
 }
 function setTA(ta, value) { keepScroll(ta, () => { ta.value = value; }); }
-function syncTextarea() { const ta = $('#body'); if (ta) S.draft.body = ta.value; }
+function syncTextarea() {
+  const ta = $('#body');
+  if (S.draft && S.draft.lyr) { if (ta) S.draft.lyr.text = ta.value; restoreChords(); return; }
+  if (ta) S.draft.body = ta.value;
+}
+// ---------- Hide chords while editing words ----------
+// Lines with lyrics lose their [chords]; chord-only lines and {directives} stay as they are.
+// Each chord remembers its word and position so it can be put back after the words change.
+function stripChords(body) {
+  const lines = (body || '').split('\n');
+  const info = lines.map(line => {
+    if (/^\s*\{/.test(line) || !/\[[^\]\n]*\]/.test(line)) return null;
+    let plain = '', chords = [], re = /\[([^\]\n]*)\]/g, m, last = 0;
+    while ((m = re.exec(line))) { plain += line.slice(last, m.index); chords.push({ c: m[1], at: plain.length }); last = re.lastIndex; }
+    plain += line.slice(last);
+    if (!plain.trim()) return null;   // only chords on this line: leave it visible
+    chords.forEach(ch => {
+      const before = plain.slice(0, ch.at);
+      ch.word = (before.match(/\S+/g) || []).length - (/\S$/.test(before) ? 1 : 0);   // index of the word the chord sits in or before
+      const ws = [...plain.matchAll(/\S+/g)];
+      const w = ws[ch.word];
+      ch.off = w ? Math.max(0, ch.at - w.index) : 0;
+      ch.frac = plain.length ? ch.at / plain.length : 0;
+      ch.end = !w;   // after the last word
+    });
+    return { orig: line, plain, chords };
+  });
+  return { text: lines.map((l, i) => info[i] ? info[i].plain : l).join('\n'), info, count: lines.length };
+}
+function putChordsBack(line, rec) {
+  if (rec.plain === line) return rec.orig;   // unchanged line: restore exactly
+  const ws = [...line.matchAll(/\S+/g)], same = ws.length === (rec.plain.match(/\S+/g) || []).length;
+  const spots = rec.chords.map(ch => {
+    let at;
+    if (ch.end || !ws.length) at = line.replace(/\s+$/, '').length;
+    else if (same) { const w = ws[Math.min(ch.word, ws.length - 1)]; at = w.index + Math.min(ch.off, w[0].length - 1); }
+    else {   // the words changed: keep the chord at about the same place, on the nearest word start
+      const target = ch.frac * line.length;
+      at = ws.reduce((best, w) => Math.abs(w.index - target) < Math.abs(best - target) ? w.index : best, ws[0].index);
+    }
+    return { at, c: ch.c };
+  });
+  let out = line;
+  spots.map((x, i) => ({ ...x, i })).sort((a, b) => b.at - a.at || b.i - a.i).forEach(x => { out = out.slice(0, x.at) + '[' + x.c + ']' + out.slice(x.at); });
+  return out;
+}
+// Which dictionary to ask the device for. "Both" looks at the whole song, not just its first words,
+// since devices guess the language from the start of the text.
+const SV_WORDS = new Set('och att det som en är på för med jag har inte till den av om så men vi du var ska kan när vill bara han hon mig dig sig sin min din vår där här nu då än efter under över utan mot också alla allt någon något hela aldrig alltid inget ingen vad vem hur varför kommer blir finns säger gör går står ligger tar får ger'.split(' '));
+const EN_WORDS = new Set('the and you that it is was for on are with he she they we his her my your our this be at have from not but what all were when can there an which their if will would out up about who get go me do so just know like love one time no them him some could than then now only its over think also back after into us said see way well even because these give most day'.split(' '));
+function detectLang(text) {
+  const words = (text || '').toLowerCase().replace(/\{[^}]*\}|\[[^\]]*\]/g, ' ').match(/[a-zåäöéü']+/g) || [];
+  let sv = 0, en = 0;
+  for (const w of words) { if (/[åäö]/.test(w)) sv += 2; if (SV_WORDS.has(w)) sv++; if (EN_WORDS.has(w)) en++; }
+  return sv > en ? 'sv-SE' : en > sv ? 'en' : '';
+}
+function spellLangFor(text) {
+  const m = S.settings.spell || 'both';
+  return m === 'sv' ? 'sv-SE' : m === 'en' ? 'en' : detectLang(text);
+}
+let langT = null;
+function refreshSpellLang() {
+  clearTimeout(langT);
+  langT = setTimeout(() => { const ta = $('#body'); if (!ta || !S.draft || !S.draft.lyr) return; const l = spellLangFor(ta.value); if (ta.lang !== l) ta.lang = l; }, 600);
+}
+function restoreChords() {
+  const d = S.draft; if (!d || !d.lyr) return;
+  const lines = d.lyr.text.split('\n'); const info = d.lyr.info;
+  if (d.lyr.text !== d.lyr.start) d.body = lines.map((l, i) => info[i] && !/\[[^\]\n]*\]/.test(l) ? putChordsBack(l, info[i]) : l).join('\n');
+  const changedCount = lines.length !== d.lyr.count;
+  d.lyr = null;
+  if (changedCount) toast('The number of lines changed, so some chords may be on the wrong lines. Check the Chart tab.');
+}
 
 // ---------- auto-scroll & wake lock ----------
 let raf = null, lastT = 0, acc = 0;
@@ -1627,6 +1731,7 @@ const A = {
     const ok = await saveFile(filename, new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }), `Library exported: ${what}.`);
     if (S.sheet === sh) { sh.busy = false; if (ok) closeSheet(); else drawSheet(); }
   },
+  clSpell(el) { S.settings.clSpell = el.dataset.v; saveSettings(); render(); },
   copySong() {
     const s = S.songs.get(cur().id); if (!s) return;
     const base = (s.title || 'Untitled').replace(/ \(version \d+\)$/, '');
@@ -1653,6 +1758,13 @@ const A = {
     const wasNew = d.isNew; S.draft = null;
     if (wasNew) { S.stack.pop(); go({ name: 'song', id: song.id, tr: 0 }); } else back();
   },
+  spellLang(el) { const ta = $('#body'); if (ta) S.draft.lyr.text = ta.value; S.settings.spell = el.dataset.v; saveSettings(); render(); },
+  lyrToggle() {
+    const d = S.draft;
+    if (d.lyr) { syncTextarea(); render(); toast('Chords are back. Check the Chart tab to see where they landed.'); return; }
+    syncTextarea(); const st = stripChords(d.body);
+    d.lyr = { text: st.text, start: st.text, info: st.info, count: st.count }; render();
+  },
   mode(el) { syncTextarea(); S.draft.mode = el.dataset.m; S.sel = null; render(); },
   tapMode(el) { S.settings.tapMode = el.dataset.m; saveSettings(); render(); },
   ins(el) {
@@ -1675,6 +1787,7 @@ const A = {
   diag() { const m = S.draft.body.slice(S.sel.co).match(/^\[([^\]\n]*)\]/); if (m) openChord(m[1]); },
   secT(el) { S.sel = null; editBody(b => transposeText(b, +el.dataset.n, +el.dataset.s, +el.dataset.e)); },
   trSel(el) {
+    if (S.draft.lyr) return;
     const ta = $('#body'); if (!ta) return;
     let a = ta.selectionStart, z = ta.selectionEnd; const whole = a === z; if (whole) { a = 0; z = ta.value.length; }
     const before = ta.value.length; const nv = transposeText(ta.value, +el.dataset.n, a, z);
@@ -1689,12 +1802,13 @@ const A = {
     if (el.dataset.d === 'chorus') ins = '{soc}\n' + (v.slice(a, z) || '') + (z > a && !v.slice(a, z).endsWith('\n') ? '\n' : '') + '{eoc}\n';
     else ins = '{c: Verse}\n' + v.slice(a, z);
     const pre = a > 0 && v[a - 1] !== '\n' ? '\n' : '';
-    setTA(ta, v.slice(0, a) + pre + ins + v.slice(z)); S.draft.body = ta.value; markDirty();
+    setTA(ta, v.slice(0, a) + pre + ins + v.slice(z)); if (S.draft.lyr) S.draft.lyr.text = ta.value; else S.draft.body = ta.value; markDirty();
     keepScroll(ta, () => ta.focus({ preventScroll: true }));
     const pos = a + pre.length + (el.dataset.d === 'chorus' ? 6 : 4);
     keepScroll(ta, () => ta.setSelectionRange(pos, el.dataset.d === 'chorus' ? pos : pos + 5));
   },
   convert() {
+    if (S.draft.lyr) return;
     const ta = $('#body'); if (!ta) return;
     let a = ta.selectionStart, z = ta.selectionEnd; if (a === z) { a = 0; z = ta.value.length; }
     const conv = convertChordsOverLyrics(ta.value.slice(a, z));
@@ -1801,11 +1915,17 @@ document.addEventListener('click', e => {
   const f = A[el.dataset.act]; if (!f) return;
   e.preventDefault(); f(el, e);
 });
-document.addEventListener('submit', e => { e.preventDefault(); if (e.target.dataset.form === 'pick') { const i = $('#pick-in'); if (i) placeChord(i.value); } });
+document.addEventListener('submit', e => {
+  e.preventDefault();
+  if (e.target.dataset.form === 'pick') { const i = $('#pick-in'); if (i) placeChord(i.value); }
+  if (e.target.dataset.form === 'clfind') { const c = (S.clq || '').trim().replace(/♯/g, '#').replace(/♭/g, 'b'); if (chordInfo(c)) openChord(c); else toast("That isn't a chord name I can draw."); }
+});
 document.addEventListener('input', e => {
   const k = e.target.dataset.in; if (!k) return; const val = e.target.value;
   if (k === 'q') { S.q = val; render(); }
   else if (k === 'm:title') { S.mdraft.title = val; S.mdraft.dirty = true; const dd = $('#mdirty'); if (dd) dd.textContent = 'Unsaved changes'; }
+  else if (k === 'clq') { S.clq = val; const b = document.querySelector('.cl-find button'); if (b) b.disabled = !chordInfo(val.trim().replace(/♯/g, '#').replace(/♭/g, 'b')); }
+  else if (k === 'lyr') { S.draft.lyr.text = val; markDirty(); refreshSpellLang(); }
   else if (k.startsWith('f:')) { S.draft[k.slice(2)] = val; markDirty(); }
   else if (k === 'inst') { S.settings.inst = val; saveSettings(); }
   else if (k === 'speed') { S.settings.speed = +val; saveSettings(); }
