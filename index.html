@@ -111,6 +111,7 @@ code,kbd{font-family:var(--f-mono);font-size:.9em;background:var(--sunk);padding
 .grp>button{min-width:40px;height:38px;padding:0 10px;font-weight:700;font-size:1.05rem}
 .grp>button:first-child{border-radius:999px 0 0 999px}.grp>button:last-child{border-radius:0 999px 999px 0}
 .grp>button:hover{background:var(--sunk)}
+.acc{margin:0}.acc button{min-width:36px;padding:6px 10px;font-size:1rem}
 .tr-val{font-family:var(--f-mono);font-weight:600;font-size:.92rem;padding:0 4px;min-width:5.4em;text-align:center;font-variant-numeric:tabular-nums}
 .tr-val .lbl{font-family:var(--f-body);font-weight:400;color:var(--muted);font-size:.8rem}
 .tr-val small{color:var(--chord);font-size:.8rem}
@@ -152,6 +153,9 @@ code,kbd{font-family:var(--f-mono);font-size:.9em;background:var(--sunk);padding
 .seg{display:inline-flex;flex-direction:column}
 .ly{white-space:pre-wrap}
 .seg[data-split] .ly{display:flex}
+.ln.joined .seg{position:relative}
+.ln.joined .seg>.ch.ph{padding:0}
+.ch.abs{position:absolute;left:0;top:0;z-index:1}
 .dash{flex:1 0 0;min-width:0;overflow:hidden;text-align:center;color:var(--muted)}
 .ch{font-family:var(--f-mono);font-weight:600;font-size:.84em;line-height:1.5;color:var(--chord);padding:0 .5em 0 0;white-space:nowrap;text-align:left;border-radius:4px}
 button.ch:hover{background:var(--chord-soft)}
@@ -160,6 +164,8 @@ button.ch:hover{background:var(--chord-soft)}
 .ch.nc{color:var(--muted);font-weight:500}
 .ch.ph{visibility:hidden}
 .chordsonly{display:flex;flex-wrap:wrap;gap:.2em .9em;margin-top:.15em}
+.tab-block{overflow-x:auto;margin:.25em 0 .4em;-webkit-overflow-scrolling:touch}
+.tab-block pre{margin:0;font-family:var(--f-mono);font-weight:500;font-size:.78em;line-height:1.45;white-space:pre;color:var(--ink-2);font-variant-ligatures:none;tab-size:4}
 .gap{height:.75em}
 
 /* editing the chart */
@@ -274,6 +280,9 @@ details.help ul{padding-left:1.2em;margin:.5em 0}
 .cl-table th{font-size:.72rem;font-weight:700;color:var(--muted);text-align:center;white-space:nowrap;padding:2px 4px}
 .cl-table th[scope=row]{font-family:var(--f-mono);font-size:.95rem;color:var(--ink);text-align:right;padding-right:8px;position:sticky;left:0;background:color-mix(in srgb,var(--bg) 80%,transparent)}
 .cl-table td .chip{width:100%;min-width:3.6em;white-space:nowrap}
+.clear-warn{margin:0 0 10px;padding:10px 12px;border-radius:10px;background:color-mix(in srgb,var(--danger) 14%,transparent);color:var(--ink);font-weight:700}
+.btn.danger-fill{background:var(--danger);border-color:var(--danger);color:var(--on-chord)}
+.btn.danger-fill:disabled{opacity:.35}
 .imp-list{max-height:58vh;overflow:auto;margin:0 -4px;padding:0 4px}
 .imp-g{border-top:1px solid var(--line);padding-top:10px;margin-top:6px}
 .imp-gh{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:flex-end;justify-content:space-between;margin-bottom:4px}
@@ -365,7 +374,11 @@ function keyInfo(keyStr) {
   if (!sp) return null;
   return { pc: PC[sp.root], minor: /^(m|min|mi|-)(?!aj)/.test(sp.qual) };
 }
+// How black-key notes are named after transposing: 'sharp' (G#), 'flat' (Ab) or 'key' (by key signature).
+let ACC_PREF = 'sharp';
 function flatsFor(pc, minor) {
+  if (ACC_PREF === 'sharp') return false;
+  if (ACC_PREF === 'flat') return [1, 3, 6, 8, 10].includes(mod12(pc)) || [5, 10, 3, 8, 1, 6].includes(minor ? mod12(pc + 3) : mod12(pc));
   const major = minor ? mod12(pc + 3) : mod12(pc);
   return [5, 10, 3, 8, 1, 6].includes(major);
 }
@@ -833,6 +846,7 @@ const S = {
   settings: Object.assign({ inst: 'gtr', size: 19, speed: 24 }, loadSettings())
 };
 if (!INST[S.settings.inst]) S.settings.inst = 'gtr';
+ACC_PREF = ['sharp', 'flat', 'key'].includes(S.settings.acc) ? S.settings.acc : 'sharp';
 const cur = () => S.stack[S.stack.length - 1];
 
 // ---------- storage ----------
@@ -908,12 +922,31 @@ function withFocus(fn) {
   fn();
   if (id) { const el = document.getElementById(id); if (el && el !== document.activeElement) { el.focus({ preventScroll: true }); try { if (ss != null) el.setSelectionRange(ss, se); } catch {} } }
 }
+// Joined words: chords float above the text, so neighbours can collide. Nudge later chords right until they clear.
+function fixChordOverlaps() {
+  document.querySelectorAll('.ln.joined').forEach(line => {
+    const chords = [...line.querySelectorAll('.ch:not(.ph)')];
+    chords.forEach(c => { c.style.transform = ''; });
+    let prevRight = -1e9, prevTop = null;
+    for (const c of chords) {
+      const r = c.getBoundingClientRect();
+      if (prevTop !== null && Math.abs(r.top - prevTop) < 4 && r.left < prevRight + 4) {
+        const dx = prevRight + 4 - r.left; c.style.transform = `translateX(${dx}px)`; prevRight = r.right + dx;
+      } else prevRight = r.right;
+      prevTop = r.top;
+    }
+  });
+}
+let fixRaf = 0;
+function scheduleFix() { cancelAnimationFrame(fixRaf); fixRaf = requestAnimationFrame(fixChordOverlaps); }
+window.addEventListener('resize', scheduleFix);
+try { document.fonts && document.fonts.ready.then(scheduleFix); } catch {}
 function render() {
   try { document.body.classList.toggle('calm', ['song', 'edit', 'medley'].includes(cur().name)); } catch {}
   withFocus(() => {
     const v = cur();
     $('#app').innerHTML = v.name === 'library' ? vLibrary() : v.name === 'song' ? vSong() : v.name === 'edit' ? vEdit() : v.name === 'setlist' ? vSetlist() : v.name === 'medley' ? vMedley() : '';
-  });
+  });  scheduleFix();
 }
 let toastT = null;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, 3200); }
@@ -951,10 +984,17 @@ function songKeys(s) {
   if (keyCache.has(id)) return keyCache.get(id);
   const a = analyzeKeys(keyUnits(s.body), manual);
   const r = a ? { ...a, auto: !manual } : (manual ? { base: manual, changes: [], end: manual, auto: false } : null);
+  if (r) { const sp = spellIn(s.body, (s.key || '').trim()); const tag = k => k && sp[k.pc] != null ? { ...k, spell: sp[k.pc] } : k; r.base = tag(r.base); r.end = tag(r.end); r.changes = r.changes.map(tag); }
   keyCache.set(id, r);
   return r;
 }
-const keyStr = (k, n = 0) => k ? keyName(mod12(k.pc + n), k.minor, flatsFor(k.pc + n, k.minor)) : '';
+// Untransposed keys keep the spelling the song itself uses (a song written in Ab stays Ab).
+const keyStr = (k, n = 0) => k ? keyName(mod12(k.pc + n), k.minor, !n && k.spell != null ? k.spell : flatsFor(k.pc + n, k.minor)) : '';
+function spellIn(body, typed) {
+  const map = {};
+  for (const c of [typed, ...chordsIn(body || '')]) { const sp = c && splitChord(c); if (sp && /[#b]/.test(sp.root)) { const pc = PC[sp.root]; if (map[pc] == null) map[pc] = /b/.test(sp.root); } }
+  return map;
+}
 function transposeSongBody(s, n) {
   let body = s.body || ''; if (!n) return body;
   const ks = songKeys(s); const ki = ks && ks.base;
@@ -1011,7 +1051,7 @@ function lyricsSections(body) {
     const paras = [[]];
     for (const it of sec.items) {
       if (it.t === 'blank') { if (paras[paras.length - 1].length) paras.push([]); continue; }
-      if (it.t !== 'line') continue;
+      if (it.t !== 'line' || isTabLine(lineText(it))) continue;   // tabs aren't sung
       const text = it.segs.map(x => (x.c !== null && x.c.trim() && !splitChord(x.c) ? ' (' + x.c.trim() + ') ' : '') + x.x).join('').replace(/\s+/g, ' ').trim();
       const words = it.segs.map(x => x.x).join('').trim();
       if (text && words) paras[paras.length - 1].push(text);   // skip lines that were only chords or notes
@@ -1090,6 +1130,19 @@ function exportSheet() {
     <p class="hint" style="margin:10px 0 0">${total ? `${nS} song${nS === 1 ? '' : 's'}, ${nM} medley${nM === 1 ? '' : 's'} and ${nL} setlist${nL === 1 ? '' : 's'}${extra > 0 ? `, including ${extra} added because they're used` : ''}.` : 'Nothing selected.'}</p>
     <button class="btn primary" data-act="exGo" style="width:100%;margin-top:10px" ${total && !sh.busy ? '' : 'disabled'}>${sh.busy ? 'Exporting…' : 'Export'}</button>`;
 }
+function clearSheet() {
+  const sh = S.sheet;
+  const nS = [...S.songs.values()].filter(x => !x.medley).length, nM = S.songs.size - nS, nL = S.setlists.size;
+  const what = [`${nS} song${nS === 1 ? '' : 's'}`, `${nM} medley${nM === 1 ? '' : 's'}`, `${nL} setlist${nL === 1 ? '' : 's'}`].join(', ');
+  const where = S.mode === 'db' ? 'the shared library, for everyone who uses this songbook' : 'your library on this device';
+  const ok = sh.typed === 'DELETE';
+  return `<div class="sheet-h"><h2>Clear Library</h2><button class="icon" data-act="closeSheet" aria-label="Close">×</button></div>
+    <p class="clear-warn">This permanently deletes ${where}: ${what}. It can't be undone.</p>
+    <p class="hint">Want a copy first? <button class="btn" data-act="exportLib">Export Library</button></p>
+    <div class="field"><label for="clear-in">Type DELETE and press OK to delete ${S.mode === 'db' ? 'the shared' : 'your local'} library</label>
+      <input id="clear-in" data-in="clearTyped" value="${esc(sh.typed)}" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="DELETE"></div>
+    <div class="row-tools" style="margin-top:12px"><button class="btn" data-act="closeSheet">Cancel</button><button class="btn danger-fill" data-act="clearGo" ${ok && !sh.busy ? '' : 'disabled'}>${sh.busy ? 'Deleting…' : 'OK'}</button></div>`;
+}
 const medPart = p => ({ id: p.id, tr: p.tr || 0, skip: [...(p.skip || [])] });
 // A medley stores links to songs; its chart is built from the originals each time it is shown.
 function effective(s) {
@@ -1099,7 +1152,7 @@ function effective(s) {
     const skip = p.skip || [];
     const skipped = songParts(src.body).filter(x => skip.includes(x.key)).map(x => x.label);
     const kept = { ...src, body: cutParts(src.body, skip) };
-    const head = `{medley_part: ${(src.title || 'Untitled').replace(/[{}|]/g, '')}${skipped.length ? '||skips ' + skipped.join(', ').replace(/[{}|]/g, '') : ''}}`;
+    const head = `{medley_part: ${(src.title || 'Untitled').replace(/[{}|]/g, '')}||${skipped.length ? 'skips ' + skipped.join(', ').replace(/[{}|]/g, '') : ''}||${src.join ? 1 : 0}}`;
     return head + '\n' + transposeSongBody(kept, p.tr || 0);
   }).join('\n\n');
   const first = parts[0] && songKeys(parts[0].src);
@@ -1140,7 +1193,7 @@ function parseSong(text) {
       else if (d === 'sov' || d === 'start_of_verse') items.push({ t: 'sec', kind: 'verse', label: arg || 'Verse', start });
       else if (d === 'sob' || d === 'start_of_bridge') items.push({ t: 'sec', kind: 'bridge', label: arg || 'Bridge', start });
       else if (/^(eoc|eov|eob|end_of_)/.test(d)) items.push({ t: 'end', start, next: off });
-      else if (d === 'medley_part') { const [lab, note] = arg.split('||'); items.push({ t: 'sec', kind: 'mpart', label: lab.trim(), note: (note || '').trim(), start }); }
+      else if (d === 'medley_part') { const [lab, note, j] = arg.split('||'); items.push({ t: 'sec', kind: 'mpart', label: lab.trim(), note: (note || '').trim(), join: (j || '').trim() === '1', start }); }
       else if (['c', 'comment', 'ci', 'comment_italic', 'cb', 'comment_box', 'section'].includes(d)) items.push({ t: 'sec', kind: /chorus|refrain/i.test(arg) ? 'chorus' : 'part', label: arg, start });
       continue;
     }
@@ -1152,7 +1205,7 @@ function parseSong(text) {
   const secs = []; let s = { label: '', kind: 'none', start: 0, items: [] };
   const close = end => { s.end = end; if (s.items.length || s.label) secs.push(s); };
   for (const it of items) {
-    if (it.t === 'sec') { close(it.start); s = { label: it.label, kind: it.kind, note: it.note, start: it.start, items: [] }; }
+    if (it.t === 'sec') { close(it.start); s = { label: it.label, kind: it.kind, note: it.note, join: it.join, start: it.start, items: [] }; }
     else if (it.t === 'end') { close(it.next); s = { label: '', kind: 'none', start: it.next, items: [] }; }
     else s.items.push(it);
   }
@@ -1191,23 +1244,40 @@ function renderLine(it, o) {
       const body = o.edit ? chars(p, off) : esc(p);
       // A word split by a chord: if the chord is wider than its syllable, the gap shows a hyphen.
       const last = (p || prev).slice(-1);
-      const midWord = k === parts.length - 1 && last && /\S/.test(last) && /^\S/.test(nextText);
-      h += `<span class="seg"${midWord ? ' data-split' : ''}>${top}<span class="ly">${body || (midWord ? '' : '&nbsp;')}${midWord ? '<span class="dash" aria-hidden="true">-</span>' : ''}</span></span>`;
+      const midWord = k === parts.length - 1 && last && /[\p{L}\p{N}']/u.test(last) && /^[\p{L}\p{N}']/u.test(nextText);   // letters on both sides, not punctuation
+      if (o.join) {   // joined: chords float above the text and never widen words or the spaces between them
+        const floatTop = top === PH ? PH : PH + top.replace('class="ch', 'class="ch abs');
+        h += `<span class="seg"${midWord ? ' data-split' : ''}>${floatTop}<span class="ly">${body || (midWord ? '' : '&nbsp;')}</span></span>`;
+      } else h += `<span class="seg"${midWord ? ' data-split' : ''}>${top}<span class="ly">${body || (midWord ? '' : '&nbsp;')}${midWord ? '<span class="dash" aria-hidden="true">-</span>' : ''}</span></span>`;
       if (p) prev = p;
       off += p.length;
     });
   });
   if (o.edit) h += `<span class="seg">${PH}<span class="ly">${addEnd}</span></span>`;
-  return `<div class="ln wc">${h}</div>`;
+  return `<div class="ln wc${o.join ? ' joined' : ''}">${h}</div>`;
 }
+// Guitar tab lines, like "e|-0-2-3-|": shown in a fixed-width font so the columns line up.
+function isTabLine(t) {
+  const x = String(t || '').trim();
+  if (!/^([A-Ga-g][#b]?\s*)?[|:]/.test(x) || !/-{3,}/.test(x)) return false;
+  const other = x.replace(/^[A-Ga-g][#b]?/, '').replace(/[-0-9|:hpbrxs\/\\~()^*.\s]/gi, '');
+  return other.length <= 2;
+}
+const lineText = it => it.segs.map(x => (x.c !== null ? '[' + x.c + ']' : '') + x.x).join('');
 function renderSong(body, o) {
-  const secs = parseSong(body || '');
+  const secs = parseSong(body || ''); let join = !!o.join;
   return secs.map(sec => {
     let lines = ''; let lastBlank = true;
+    if (sec.kind === 'mpart') join = !!sec.join;   // each song in a medley keeps its own word-split style
+    let tab = [];
+    const flushTab = () => { if (tab.length) { lines += `<div class="tab-block"><pre>${tab.map(esc).join('\n')}</pre></div>`; tab = []; } };
     for (const it of sec.items) {
+      if (it.t === 'line' && isTabLine(lineText(it))) { tab.push(lineText(it).replace(/\s+$/, '')); lastBlank = false; continue; }
+      flushTab();
       if (it.t === 'blank') { if (!lastBlank) lines += '<div class="gap"></div>'; lastBlank = true; continue; }
-      lastBlank = false; lines += renderLine(it, o.flatsAt ? { ...o, flats: o.flatsAt(it.start) } : o);
+      lastBlank = false; lines += renderLine(it, { ...o, join, ...(o.flatsAt ? { flats: o.flatsAt(it.start) } : {}) });
     }
+    flushTab();
     const hasChords = sec.items.some(it => it.t === 'line' && it.segs.some(s => s.c !== null && splitChord(s.c)));
     const tools = o.edit && hasChords && sec.label ? `<span class="sec-tools"><button class="mini" data-act="secT" data-s="${sec.start}" data-e="${sec.end}" data-n="-1" title="Transpose this part down a semitone">−1</button><button class="mini" data-act="secT" data-s="${sec.start}" data-e="${sec.end}" data-n="1" title="Transpose this part up a semitone">+1</button></span>` : '';
     const head = sec.label ? `<div class="sec-h"><span class="sec-label">${esc(sec.label)}</span>${sec.note ? `<span class="sec-note">${esc(sec.note)}</span>` : ''}${tools}</div>` : '';
@@ -1218,9 +1288,9 @@ function renderSong(body, o) {
 // ---------- views ----------
 function statusLine() {
   if (S.mode === 'db') return `<div class="backup"><p class="status">Shared songbook. Everyone you share this page with as Contributor or Editor can add, edit and reorder songs, and sees changes as they happen. Use Export Library to keep your own copy or to move songs to the tablet app. Importing adds new songs and updates changed ones. Nothing is deleted.</p>
-    <div class="row-tools"><button class="btn" data-act="exportLib">Export Library</button><label class="btn" for="imp">Import Library</label><input id="imp" type="file" accept=".json,application/json" data-ch="import" hidden></div></div>`;
+    <div class="row-tools"><button class="btn" data-act="exportLib">Export Library</button><label class="btn" for="imp">Import Library</label><input id="imp" type="file" accept=".json,application/json" data-ch="import" hidden><button class="btn danger" data-act="clearOpen" ${S.songs.size || S.setlists.size ? '' : 'disabled'}>Clear Library</button></div></div>`;
   if (S.mode === 'local' && STANDALONE) return `<div class="backup"><p class="status">Songs are saved on this device. Use Export Library now and then, and keep the file somewhere safe, like Google Drive. Importing a library file adds its songs and updates ones that changed. Nothing is deleted.</p>
-    <div class="row-tools"><button class="btn" data-act="exportLib">Export Library</button><label class="btn" for="imp">Import Library</label><input id="imp" type="file" accept=".json,application/json" data-ch="import" hidden></div></div>`;
+    <div class="row-tools"><button class="btn" data-act="exportLib">Export Library</button><label class="btn" for="imp">Import Library</label><input id="imp" type="file" accept=".json,application/json" data-ch="import" hidden><button class="btn danger" data-act="clearOpen" ${S.songs.size || S.setlists.size ? '' : 'disabled'}>Clear Library</button></div></div>`;
   if (S.mode === 'local') return `<p class="status">Saved in this browser only. Open the songbook from its shared link to keep one library for both of you.</p>`;
   return '';
 }
@@ -1307,6 +1377,7 @@ function vSong() {
     <div class="tb-title">${badge}<div class="t1">${esc(s.title || 'Untitled')}</div>${s.artist ? `<div class="t2">${esc(s.artist)}</div>` : ''}</div>
     <button class="btn ghost" data-act="copySong" title="Make a separate copy to create another version">Copy</button><button class="btn" data-act="edit">${s.medley ? 'Edit medley' : 'Edit'}</button></div></header>
   <div class="controls"><div class="wrap ctl">
+    <div class="seg-ctl imp-seg acc" role="group" aria-label="Note names when transposing"><button data-act="acc" data-v="sharp" aria-pressed="${ACC_PREF === 'sharp'}" title="Sharps: G♯">♯</button><button data-act="acc" data-v="flat" aria-pressed="${ACC_PREF === 'flat'}" title="Flats: A♭">♭</button></div>
     <div class="grp" role="group" aria-label="Transpose"><button data-act="tr" data-n="-1" aria-label="Transpose down">−</button><span class="tr-val"${ks && ks.auto ? ' title="Detected from the opening chords. Set it in Edit to override."' : ''}><span class="lbl">${ks && ks.auto ? 'Key ≈ ' : 'Key '}</span>${esc(pretty(keyNow) || '—')}${n ? ` <small>${n > 0 ? '+' : ''}${n}</small>` : ''}</span><button data-act="tr" data-n="1" aria-label="Transpose up">+</button></div>
     <select id="inst" class="sel" data-in="inst" aria-label="Instrument for chord shapes">${instOpts}</select>
     <div class="grp" role="group" aria-label="Text size"><button data-act="size" data-n="-1" aria-label="Smaller text">A−</button><button data-act="size" data-n="1" aria-label="Larger text">A+</button></div>
@@ -1318,7 +1389,7 @@ function vSong() {
     ${used.length ? `<div class="used"><span class="lbl">Chords</span>${used.map(c => chordInfo(c) ? `<button class="chip" data-act="chord" data-c="${esc(c)}">${esc(pretty(c))}</button>` : `<span class="chip plain">${esc(pretty(c))}</span>`).join('')}</div>` : ''}
     ${skippedLabels.length ? `<p class="keynote"><span class="lbl">In this setlist</span> Skipping ${esc(skippedLabels.join(', '))}.</p>` : ''}
     ${keyChangeNote(ks, n)}
-    <article class="chart" style="--lyric:${S.settings.size}px">${(s.body || '').trim() ? renderSong(s.body, { n, flats, flatsAt }) : (s.medley ? '<p class="hint">This medley has no songs yet. Tap Edit medley to add some.</p>' : '<p class="hint">No lyrics yet. Tap Edit to add them.</p>')}</article>
+    <article class="chart" style="--lyric:${S.settings.size}px">${(s.body || '').trim() ? renderSong(s.body, { n, flats, flatsAt, join: !!s.join }) : (s.medley ? '<p class="hint">This medley has no songs yet. Tap Edit medley to add some.</p>' : '<p class="hint">No lyrics yet. Tap Edit to add them.</p>')}</article>
     ${playnav}
   </main>`;
 }
@@ -1343,7 +1414,8 @@ function vEdit() {
       <li>Add <code>*</code> to a chord, like <code>[G*]</code>, to show it in red. Chords written as <code>G*</code> above the lyrics keep the mark when you convert them.</li>
       <li>Anything in brackets that isn't a chord, like <code>[x2]</code>, is shown as a note.</li></ul></details>`;
   const tm = S.settings.tapMode === 'move' ? 'move' : 'insert';
-  const chart = `<div class="tapbar"><span class="lbl">Tapping a letter</span><div class="seg-ctl" role="group" aria-label="What tapping a letter does"><button data-act="tapMode" data-m="insert" aria-pressed="${tm === 'insert'}">Insert</button><button data-act="tapMode" data-m="move" aria-pressed="${tm === 'move'}">Move</button></div></div>
+  const chart = `<div class="tapbar"><span class="lbl">Tapping a letter</span><div class="seg-ctl" role="group" aria-label="What tapping a letter does"><button data-act="tapMode" data-m="insert" aria-pressed="${tm === 'insert'}">Insert</button><button data-act="tapMode" data-m="move" aria-pressed="${tm === 'move'}">Move</button></div>
+      <span class="lbl">Split words</span><div class="seg-ctl" role="group" aria-label="How words split by a chord look"><button data-act="wordJoin" data-v="0" aria-pressed="${!d.join}">Hyphen</button><button data-act="wordJoin" data-v="1" aria-pressed="${!!d.join}">Joined</button></div></div>
     <p class="hint">${tm === 'move' ? 'Move: tap a chord, then tap the letter it should sit on. The chord stays selected so you can keep placing it.' : 'Insert: tap a letter to add a new chord there.'} Tap a chord to nudge, change or remove it. Each labeled part has −1/+1 to transpose just that part.</p><div id="pv">${previewInner()}</div>`;
   return `<header class="topbar"><div class="wrap bar"><button class="icon" data-act="cancelEdit" aria-label="Back">‹</button><div class="tb-title"><div class="t1">${d.copyOf ? 'New version' : d.isNew ? 'New song' : 'Edit song'}</div><div class="t2" id="dirty">${d.dirty ? 'Unsaved changes' : 'No changes yet'}</div></div><button class="btn primary" data-act="saveEdit">Save</button></div></header>${conf}
   <main class="wrap">
@@ -1357,7 +1429,7 @@ function vEdit() {
 function previewInner() {
   const d = S.draft;
   const art = (d.body || '').trim()
-    ? `<article class="chart edit" style="--lyric:${S.settings.size}px">${renderSong(d.body, { edit: true, sel: S.sel ? S.sel.co : -1 })}</article>`
+    ? `<article class="chart edit" style="--lyric:${S.settings.size}px">${renderSong(d.body, { edit: true, sel: S.sel ? S.sel.co : -1, join: !!d.join })}</article>`
     : `<p class="hint">Nothing here yet. Switch to Text and write or paste the lyrics.</p>`;
   let bar = '';
   if (S.sel) {
@@ -1382,7 +1454,7 @@ function editKeyHint() {
 }
 let hintT = null;
 function refreshKeyHint() { clearTimeout(hintT); hintT = setTimeout(() => { if (!S.draft) return; const h = $('#keyhint'); if (h) h.innerHTML = editKeyHint(); const f = $('#f-key'); if (f) f.placeholder = editKeyPlaceholder(); }, 300); }
-function renderPreview() { const pv = $('#pv'); if (pv) pv.innerHTML = previewInner(); markDirty(); }
+function renderPreview() { const pv = $('#pv'); if (pv) pv.innerHTML = previewInner(); scheduleFix(); markDirty(); }
 function markDirty() { S.draft.dirty = true; refreshKeyHint(); const el = $('#dirty'); if (el) el.textContent = 'Unsaved changes'; }
 
 function vMedley() {
@@ -1493,7 +1565,7 @@ function closeSheet() { S.sheet = null; $('#sheetWrap').hidden = true; $('#sheet
 function drawSheet() {
   const sh = S.sheet; if (!sh) return closeSheet();
   withFocus(() => {
-    $('#sheet').innerHTML = '<div class="grab" aria-hidden="true"></div>' + (sh.type === 'chord' ? chordSheet() : sh.type === 'pick' ? pickSheet() : sh.type === 'pdf' ? pdfSheet() : sh.type === 'import' ? importSheet() : sh.type === 'export' ? exportSheet() : addSheet());
+    $('#sheet').innerHTML = '<div class="grab" aria-hidden="true"></div>' + (sh.type === 'chord' ? chordSheet() : sh.type === 'pick' ? pickSheet() : sh.type === 'pdf' ? pdfSheet() : sh.type === 'import' ? importSheet() : sh.type === 'export' ? exportSheet() : sh.type === 'clear' ? clearSheet() : addSheet());
   });
   $('#sheetWrap').hidden = false;
 }
@@ -1700,6 +1772,20 @@ const A = {
       if (S.sheet === sh) { sh.busy = false; if (ok) closeSheet(); else drawSheet(); }
     } catch (e) { sh.busy = false; drawSheet(); toast("Couldn't make the PDF."); }
   },
+  clearOpen() { S.sheet = { type: 'clear', typed: '', busy: false }; drawSheet(); setTimeout(() => { const i = $('#clear-in'); if (i) i.focus(); }, 40); },
+  async clearGo() {
+    const sh = S.sheet; if (!sh || sh.typed !== 'DELETE' || sh.busy) return;
+    sh.busy = true; drawSheet();
+    try {
+      if (db) {
+        for (const id of [...S.setlists.keys()]) await withRetry(() => db.collection('setlists').doc(id).delete());
+        for (const id of [...S.songs.keys()]) await withRetry(() => db.collection('songs').doc(id).delete());
+      }
+      S.songs = new Map(); S.setlists = new Map(); S.pdfPrefs = {};
+      if (!db) local.save();
+      closeSheet(); S.stack = [{ name: 'library', tab: 'songs' }]; afterNav(); toast('Library cleared.');
+    } catch (e) { sh.busy = false; drawSheet(); render(); toast(errMsg(e)); }
+  },
   impChoice(el) { S.sheet.plan.rows[+el.dataset.i].choice = el.dataset.v; drawSheet(); },
   impAll(el) { S.sheet.plan.rows.forEach(r => { if (r.kind === el.dataset.k) r.choice = el.dataset.v; }); drawSheet(); },
   async impGo() {
@@ -1731,6 +1817,7 @@ const A = {
     const ok = await saveFile(filename, new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }), `Library exported: ${what}.`);
     if (S.sheet === sh) { sh.busy = false; if (ok) closeSheet(); else drawSheet(); }
   },
+  acc(el) { S.settings.acc = el.dataset.v; ACC_PREF = el.dataset.v; keyCache.clear(); saveSettings(); render(); },
   clSpell(el) { S.settings.clSpell = el.dataset.v; saveSettings(); render(); },
   copySong() {
     const s = S.songs.get(cur().id); if (!s) return;
@@ -1738,7 +1825,7 @@ const A = {
     const n = [...S.songs.values()].filter(x => (x.title || '').startsWith(base + ' (version')).length;
     const t = base + ' (version ' + (n + 2) + ')';
     if (s.medley) { S.mOpen = null; S.mdraft = { id: uid(), title: t, parts: s.medley.map(medPart), isNew: true, dirty: true, copyOf: s.id }; go({ name: 'medley' }); }
-    else { S.draft = { id: uid(), title: t, artist: s.artist || '', key: s.key || '', body: s.body || '', isNew: true, dirty: true, copyOf: s.id, mode: (s.body || '').trim() ? 'chart' : 'text' }; go({ name: 'edit' }); }
+    else { S.draft = { id: uid(), join: !!s.join, title: t, artist: s.artist || '', key: s.key || '', body: s.body || '', isNew: true, dirty: true, copyOf: s.id, mode: (s.body || '').trim() ? 'chart' : 'text' }; go({ name: 'edit' }); }
     toast('Copy ready. Rename it and change what you like, then Save. The original stays as it is.');
     setTimeout(() => { const f = $('#f-title') || $('#m-title'); if (f) { f.focus(); f.select(); } }, 40);
   },
@@ -1746,13 +1833,13 @@ const A = {
   openSong(el) { S.play = null; go({ name: 'song', id: el.dataset.id, tr: 0 }); },
   edit() { const s = S.songs.get(cur().id); if (!s) return;
     if (s.medley) { S.mOpen = null; S.mdraft = { id: s.id, title: s.title || '', parts: s.medley.map(medPart), createdAt: s.createdAt, isNew: false, dirty: false }; go({ name: 'medley' }); return; }
-    S.draft = { id: s.id, title: s.title || '', artist: s.artist || '', key: s.key || '', body: s.body || '', createdAt: s.createdAt, isNew: false, dirty: false, mode: (s.body || '').trim() ? 'chart' : 'text' }; go({ name: 'edit' }); },
+    S.draft = { id: s.id, join: !!s.join, title: s.title || '', artist: s.artist || '', key: s.key || '', body: s.body || '', createdAt: s.createdAt, isNew: false, dirty: false, mode: (s.body || '').trim() ? 'chart' : 'text' }; go({ name: 'edit' }); },
   cancelEdit() { syncTextarea(); if (S.draft && S.draft.dirty) { S.confirm = 'discard'; render(); window.scrollTo(0, 0); } else { S.draft = null; back(); } },
   discard() { S.draft = null; back(); },
   keep() { S.confirm = null; render(); },
   async saveEdit() {
     syncTextarea(); const d = S.draft;
-    const song = { id: d.id, title: d.title.trim() || 'Untitled', artist: d.artist.trim(), key: d.key.trim(), body: d.body, createdAt: d.createdAt || Date.now() };
+    const song = { id: d.id, title: d.title.trim() || 'Untitled', artist: d.artist.trim(), key: d.key.trim(), body: d.body, createdAt: d.createdAt || Date.now(), ...(d.join ? { join: true } : {}) };
     const ok = await safe(() => put('songs', song), 'Saved');
     if (!ok) return;
     const wasNew = d.isNew; S.draft = null;
@@ -1766,6 +1853,7 @@ const A = {
     d.lyr = { text: st.text, start: st.text, info: st.info, count: st.count }; render();
   },
   mode(el) { syncTextarea(); S.draft.mode = el.dataset.m; S.sel = null; render(); },
+  wordJoin(el) { const v = el.dataset.v === '1'; if (!!S.draft.join === v) return; S.draft.join = v; markDirty(); render(); },
   tapMode(el) { S.settings.tapMode = el.dataset.m; saveSettings(); render(); },
   ins(el) {
     if (S.settings.tapMode === 'move') {
@@ -1778,12 +1866,12 @@ const A = {
       S.draft.body = w.slice(0, o) + tag + w.slice(o); S.sel = { co: o }; renderPreview();
       return;
     }
-    S.sel = null; S.sheet = { type: 'pick', mode: 'ins', o: +el.dataset.o, val: '' }; const pv = $('#pv'); if (pv) pv.innerHTML = previewInner(); drawSheet(); focusPick(); },
-  selChord(el) { const co = +el.dataset.co; S.sel = S.sel && S.sel.co === co ? null : { co }; const pv = $('#pv'); if (pv) pv.innerHTML = previewInner(); },
+    S.sel = null; S.sheet = { type: 'pick', mode: 'ins', o: +el.dataset.o, val: '' }; const pv = $('#pv'); if (pv) pv.innerHTML = previewInner(); scheduleFix(); drawSheet(); focusPick(); },
+  selChord(el) { const co = +el.dataset.co; S.sel = S.sel && S.sel.co === co ? null : { co }; const pv = $('#pv'); if (pv) pv.innerHTML = previewInner(); scheduleFix(); },
   mv(el) { moveChord(+el.dataset.n); },
   chg() { const m = S.draft.body.slice(S.sel.co).match(/^\[([^\]\n]*)\]/); if (!m) return; S.sheet = { type: 'pick', mode: 'chg', o: S.sel.co, val: m[1] }; drawSheet(); focusPick(); },
   delc() { const p = S.sel.co; S.sel = null; editBody(b => { const m = b.slice(p).match(/^\[[^\]\n]*\]/); return m ? b.slice(0, p) + b.slice(p + m[0].length) : b; }); },
-  desel() { S.sel = null; const pv = $('#pv'); if (pv) pv.innerHTML = previewInner(); },
+  desel() { S.sel = null; const pv = $('#pv'); if (pv) pv.innerHTML = previewInner(); scheduleFix(); },
   diag() { const m = S.draft.body.slice(S.sel.co).match(/^\[([^\]\n]*)\]/); if (m) openChord(m[1]); },
   secT(el) { S.sel = null; editBody(b => transposeText(b, +el.dataset.n, +el.dataset.s, +el.dataset.e)); },
   trSel(el) {
@@ -1924,6 +2012,7 @@ document.addEventListener('input', e => {
   const k = e.target.dataset.in; if (!k) return; const val = e.target.value;
   if (k === 'q') { S.q = val; render(); }
   else if (k === 'm:title') { S.mdraft.title = val; S.mdraft.dirty = true; const dd = $('#mdirty'); if (dd) dd.textContent = 'Unsaved changes'; }
+  else if (k === 'clearTyped') { S.sheet.typed = val; const b = document.querySelector('[data-act="clearGo"]'); if (b) b.disabled = val !== 'DELETE'; }
   else if (k === 'clq') { S.clq = val; const b = document.querySelector('.cl-find button'); if (b) b.disabled = !chordInfo(val.trim().replace(/♯/g, '#').replace(/♭/g, 'b')); }
   else if (k === 'lyr') { S.draft.lyr.text = val; markDirty(); refreshSpellLang(); }
   else if (k.startsWith('f:')) { S.draft[k.slice(2)] = val; markDirty(); }
